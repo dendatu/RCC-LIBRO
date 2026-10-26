@@ -95,10 +95,11 @@ function buildHealthChecks(): HealthCheck[] {
       label: "Outgoing e-mail provider",
       state: mailReady ? "ready" : "partial",
       detail: mailReady
-        ? `Resend is configured; notices are sent from ${emailConfig.fromAddress}.`
-        : "No RESEND_API_KEY, so due-date reminders and overdue notices are written to the journal as skipped instead of being delivered.",
+        ? `${emailConfig.label} is configured; notices are sent from ${emailConfig.fromAddress}.`
+        : emailConfig.notice ??
+          "No MAIL_SMTP_* relay and no RESEND_API_KEY, so due-date reminders and overdue notices are written to the journal as skipped instead of being delivered.",
       remedy:
-        "Set RESEND_API_KEY and verify the sending domain, then confirm delivery with the test message in the e-mail centre.",
+        "Set MAIL_SMTP_HOST / MAIL_SMTP_USER / MAIL_SMTP_PASS for an SMTP relay such as Gmail, or RESEND_API_KEY, then confirm delivery with the test message in the e-mail centre.",
     },
     {
       id: "cron",
@@ -112,11 +113,16 @@ function buildHealthChecks(): HealthCheck[] {
     {
       id: "sender",
       label: "Verified sender address",
-      state: process.env.RESEND_FROM_ADDRESS ? "ready" : "partial",
-      detail: process.env.RESEND_FROM_ADDRESS
-        ? "RESEND_FROM_ADDRESS overrides the default library address used in the From line."
-        : "Falling back to RCC LIBRO <library@rcc.edu.ph>. Resend refuses any domain it has not verified, so the default only works once that address is registered.",
-      remedy: "Verify your RCC domain with the provider and set RESEND_FROM_ADDRESS to the approved address.",
+      state: emailConfig.enabled ? "ready" : "partial",
+      detail: emailConfig.enabled
+        ? `Messages leave as ${emailConfig.from}. ${
+            emailConfig.provider === "smtp"
+              ? `The relay at ${emailConfig.smtp?.host} decides whether this mailbox may use that address.`
+              : "Resend refuses any domain it has not verified."
+          }`
+        : "Nothing is delivered yet, so the From line is only a placeholder.",
+      remedy:
+        "Set MAIL_FROM to an address the provider accepts. Gmail's SMTP only sends as the authenticated account, so MAIL_SMTP_USER and MAIL_FROM must agree.",
     },
   ];
 }

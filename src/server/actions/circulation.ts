@@ -30,6 +30,7 @@ import {
   type DeskLoan,
   type EligibilityResult,
 } from "@/server/data/circulation";
+import { sendTemplatedEmail } from "@/server/email";
 
 export interface CopyLookup {
   copy: DeskCopy;
@@ -250,23 +251,55 @@ export async function issueBook(
 
     const transactionId = String(payload.transaction_id ?? "");
     const loan = transactionId ? await getLoan(transactionId) : null;
+    const receipt: BorrowReceipt = {
+      transactionId,
+      referenceNo: String(payload.reference_no ?? loan?.reference_no ?? ""),
+      title: String(payload.title ?? loan?.book_title ?? ""),
+      author: loan?.book_author ?? "",
+      borrowerName: loan?.borrower_name ?? "",
+      barcode: loan?.barcode ?? null,
+      accessionNumber: loan?.accession_number ?? "",
+      section: (payload.section as CirculationSection) ?? (loan?.section ?? "general"),
+      dueDate: String(payload.due_date ?? loan?.due_date ?? ""),
+      issuedAt: loan?.date_borrowed ?? new Date().toISOString(),
+    };
+    await notifyBorrower(loan, receipt);
     return {
       ok: true,
-      message: `${String(payload.title ?? "The book")} is now on loan.`,
-      data: {
-        transactionId,
-        referenceNo: String(payload.reference_no ?? loan?.reference_no ?? ""),
-        title: String(payload.title ?? loan?.book_title ?? ""),
-        author: loan?.book_author ?? "",
-        borrowerName: loan?.borrower_name ?? "",
-        barcode: loan?.barcode ?? null,
-        accessionNumber: loan?.accession_number ?? "",
-        section: (payload.section as CirculationSection) ?? (loan?.section ?? "general"),
-        dueDate: String(payload.due_date ?? loan?.due_date ?? ""),
-        issuedAt: loan?.date_borrowed ?? new Date().toISOString(),
-      },
+      message: `${receipt.title} is now on loan.`,
+      data: receipt,
     };
   });
+}
+
+/**
+ * A loan already committed to the database stays committed whatever the mailer
+ * does, so a refused or unreachable message is journalled in `email_logs` and
+ * swallowed rather than reported to the desk.
+ */
+async function notifyBorrower(loan: DeskLoan | null, receipt: BorrowReceipt) {
+  if (!loan?.borrower_email) return;
+  try {
+    await sendTemplatedEmail({
+      to: loan.borrower_email,
+      userId: loan.borrower_id,
+      template: "borrow_confirmed",
+      dedupeKey: `borrow:${loan.id}`,
+      transactionId: loan.id,
+      values: {
+        borrowerName: loan.borrower_name,
+        bookTitle: receipt.title,
+        accessionNumber: receipt.accessionNumber,
+        barcode: receipt.barcode ?? "",
+        referenceNo: receipt.referenceNo,
+        borrowedDate: formatDate(loan.date_borrowed),
+        dueDate: formatDate(receipt.dueDate),
+        libraryName: loan.library_name,
+      },
+    });
+  } catch (error) {
+    console.error("[rcc-libro:email] the borrow notice could not be sent", error);
+  }
 }
 
 export async function checkInBook(

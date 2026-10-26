@@ -162,8 +162,36 @@ services:
       RESEND_API_KEY: ${RESEND_API_KEY}
       RESEND_FROM_ADDRESS: ${RESEND_FROM_ADDRESS}
       CRON_SECRET: ${CRON_SECRET}
+      # App mail (borrow confirmation + reminders). Deliberately separate from
+      # the SMTP_* block GoTrue uses for password resets.
+      MAIL_PROVIDER: ${MAIL_PROVIDER:-}
+      MAIL_SMTP_HOST: ${MAIL_SMTP_HOST:-}
+      MAIL_SMTP_PORT: ${MAIL_SMTP_PORT:-}
+      MAIL_SMTP_USER: ${MAIL_SMTP_USER:-}
+      MAIL_SMTP_PASS: ${MAIL_SMTP_PASS:-}
+      MAIL_SMTP_SECURE: ${MAIL_SMTP_SECURE:-}
+      MAIL_FROM: ${MAIL_FROM:-}
     ports:
       - "127.0.0.1:${APP_HTTP_PORT:-3000}:3000"
+
+  # --- the daily reminder sweep ---------------------------------------------
+  # Nothing else schedules it on a self-hosted machine: Vercel Cron only exists
+  # on Vercel. The script calls the same /api/cron/reminders endpoint the hosted
+  # deployment hits, so there is one job definition. Re-runs are cheap because
+  # stage_due_reminders() dedupes on email_logs.dedupe_key.
+  mailer:
+    image: rcc-libro/app:local
+    container_name: rcc-libro-mailer
+    depends_on:
+      app:
+        condition: service_started
+    environment:
+      CRON_SECRET: ${CRON_SECRET}
+      REMINDER_URL: http://app:3000/api/cron/reminders
+      # UTC hour; 22:00 is 06:00 in Manila, so notices arrive before opening.
+      REMINDER_AT: ${REMINDER_AT:-22:00}
+    entrypoint: ["node", "scripts/run-reminders.mjs", "--loop"]
+    restart: unless-stopped
 
   # --- one-shot bootstrap for the demo, in `docker compose --profile demo` --
   demo-accounts:

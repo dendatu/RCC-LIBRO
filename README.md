@@ -24,7 +24,7 @@ policy, watch analytics and read the audit trail.
 | Node 20+ | Build and run the app                      | `node -v` (developed on 24.x) |
 | Docker  | Optional — local SQL validation only       | `docker info`                 |
 | Supabase project | Database, auth, RLS               | —                             |
-| Resend account (optional) | Outbound e-mail reminders | —                  |
+| SMTP relay (optional)          | Outbound e-mail: Gmail's app-password SMTP works, as does Resend | — |
 
 Without Docker the schema still deploys normally through the Supabase dashboard;
 Docker is only used by `npm run validate:sql` (section 6).
@@ -56,7 +56,9 @@ cp .env.example .env.local
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY`| yes      | same page → `anon` / `publishable` key |
 | `SUPABASE_SERVICE_ROLE_KEY`    | yes      | same page → `service_role` / `secret` key — **server only** |
 | `NEXT_PUBLIC_SITE_URL`         | prod     | your deployed origin (used for QR payloads + auth redirects) |
-| `RESEND_API_KEY`               | no       | resend.com → API Keys. Without it the app still runs; e-mail is journaled as `queued` and never sent |
+| `MAIL_SMTP_HOST` / `_PORT` / `_USER` / `_PASS` | no | an SMTP relay — Gmail works, see §7. Without any transport e-mail is journaled as `skipped` and never sent |
+| `MAIL_FROM`                    | no       | mailbox the notices come from; the display name is always `RCC LIBRO` |
+| `RESEND_API_KEY`               | no       | resend.com → API Keys, the alternative transport |
 | `CRON_SECRET`                  | prod     | any long random string; guards `/api/cron/reminders` |
 
 > `SUPABASE_SERVICE_ROLE_KEY` deliberately has **no** `NEXT_PUBLIC_` prefix. It
@@ -238,9 +240,13 @@ numbered migrations — the same path a human follows in the Supabase dashboard.
 
 ## 7. E-mail reminders and the delivery job
 
-Due-date reminders (7, 3 and 1 days before the due date) and overdue notices are
-produced by a Postgres function, not by the UI, so they cannot be skipped or
-double-sent:
+Every notice leaves with the display name **RCC LIBRO**. Four things are sent:
+the borrow confirmation (issued straight from the desk action, so the borrower
+has the due date in writing before they walk away), the due-date reminders
+(7, 3 and 1 days before), the overdue notice, and the welcome message.
+
+Due-date reminders and overdue notices are produced by a Postgres function, not
+by the UI, so they cannot be skipped or double-sent:
 
 - `stage_due_reminders()` writes one `email_logs` row per notice, keyed by a
   unique `dedupe_key` such as `reminder:7:<transaction-id>`; a second run in the
@@ -260,11 +266,48 @@ double-sent:
   both API roles otherwise) and guarded by `assert_service_runner()`, which
   refuses any caller carrying a JWT subject.
 
-### Option A — Supabase Edge Function (recommended on Supabase)
+### Transports
+
+[`src/server/email/provider.ts`](file:///C:/Users/user/Documents/RCC%20LIBRO/src/server/email/provider.ts)
+is the only place that talks to a mail service. It picks one:
+
+| `MAIL_PROVIDER` | Needs | Notes |
+| --- | --- | --- |
+| `smtp` | `MAIL_SMTP_HOST`, `MAIL_SMTP_USER`, `MAIL_SMTP_PASS` | Port 465 is implicit TLS; 587/2525 use STARTTLS unless `MAIL_SMTP_SECURE=false`. |
+| `resend` | `RESEND_API_KEY` | Kept for a deployment that verifies its own domain. |
+| `console` | — | Nothing is sent; each row is journalled as `skipped` with the reason. |
+
+Leaving `MAIL_PROVIDER` unset picks SMTP when it is configured, otherwise Resend,
+otherwise the console. A 7-day loan means the "7 days before" reminder lands the
+same day the book is issued, so expect the confirmation and one reminder
+together on day zero.
+
+Gmail setup — the account needs 2-Step Verification, then an
+**App password** (Google account → Security → App passwords → create one named
+for the library):
+
+```dotenv
+MAIL_PROVIDER=smtp
+MAIL_SMTP_HOST=smtp.gmail.com
+MAIL_SMTP_PORT=465
+MAIL_SMTP_USER=you@gmail.com
+MAIL_SMTP_PASS=xxxx xxxx xxxx xxxx
+MAIL_FROM="RCC LIBRO <you@gmail.com>"
+```
+
+Gmail refuses a `From` that is not the authenticated mailbox, so `MAIL_FROM` must
+use the same address as `MAIL_SMTP_USER`; the app rewrites it to match rather
+than failing every send. The app password is a credential: keep it in
+`.env.local` / `docker/.env`, both gitignored, and revoke it at
+myaccount.google.com/apppasswords if it ever reaches a screenshot or a commit.
+
+### Option A — Supabase Edge Function (Resend only)
 
 Source lives in [`supabase/functions/due-reminders/index.ts`](file:///C:/Users/user/Documents/RCC%20LIBRO/supabase/functions/due-reminders/index.ts)
 with shared queue + Resend helpers in `supabase/functions/_shared/outbox.ts`.
-It uses the Deno runtime with no third-party imports.
+It uses the Deno runtime with no third-party imports — which means it **cannot**
+use the SMTP transport. Choose this option only if you are sending through
+Resend; on Gmail, use Option B or C instead.
 
 ```bash
 supabase functions deploy due-reminders --no-verify-jwt
@@ -306,8 +349,29 @@ schedule is declared in [`vercel.json`](file:///C:/Users/user/Documents/RCC%20LI
 (`0 18 * * *`, 18:00 UTC ≈ 02:00 PHT). For any other host, point your own cron at
 the same URL with the bearer token.
 
-Missing `RESEND_API_KEY` or the service-role key leaves mail `queued`/`skipped`
-and logs the reason instead of failing the run.
+Missing `MAIL_SMTP_*` / `RESEND_API_KEY` or the service-role key leaves mail
+`queued`/`skipped` and logs the reason instead of failing the run.
+
+### Option C — the `mailer` container (self-hosted Docker stack)
+
+The docker stack has no Vercel to schedule it, so
+[`docker/docker-compose.yml`](file:///C:/Users/user/Documents/RCC%20LIBRO/docker/docker-compose.yml)
+runs a `mailer` service that calls the same endpoint once a day:
+
+```bash
+npm run docker:reminders          # sweep now, from the running container
+REMINDER_AT=21:30 npm run docker:up   # change the hour (UTC; 22:00 = 06:00 PHT)
+```
+
+Outside Docker the same sweep is one command, against whatever `.env.local`
+points at:
+
+```bash
+npm run reminders
+```
+
+Re-running is harmless: `stage_due_reminders()` dedupes on `email_logs.dedupe_key`,
+so a second sweep the same day stages nothing and sends nothing.
 
 ---
 

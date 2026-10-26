@@ -543,7 +543,7 @@ export async function saveSettings(
 
   return {
     ok: true,
-    message: `${identity.senderName} <${identity.senderEmail}> signs outgoing notices · ${
+    message: `Policy saved · borrower contact ${identity.senderEmail} · ${
       input.maxBooks
     } books for ${input.loanDays} days · ₱${input.finePerDay.toFixed(2)} per day late · reminders ${reminderDays.join(
       ", ",
@@ -839,14 +839,16 @@ async function runReminderSweep(limit: number): Promise<ActionResult> {
       delivered: queue.delivered,
       failed: queue.failed,
       queue_message: queue.message,
-      provider: emailConfig.enabled ? "resend" : "none",
+      provider: emailConfig.provider,
     },
   });
   revalidateAdmin("/dashboard/admin/email", "/dashboard/notifications", "/dashboard/admin");
 
   const outcome = emailConfig.enabled
     ? `${queue.delivered} sent, ${queue.failed} failed.`
-    : "No provider key is configured, so the queue was journaled as skipped instead of being sent.";
+    : `No transport is configured, so the queue was journalled as skipped instead of being sent.${
+        emailConfig.notice ? ` (${emailConfig.notice})` : ""
+      }`;
 
   return {
     ok: true,
@@ -883,8 +885,8 @@ const testEmailSchema = z.object({
 
 /**
  * Proves the provider wiring end to end. Renders the welcome template, journals
- * the attempt in `email_logs` and reports honestly whether Resend accepted it or
- * the row was only written to the outbox.
+ * the attempt in `email_logs` and reports honestly whether the configured
+ * transport accepted it or the row was only written to the outbox.
  */
 export async function sendTestEmail(
   _prev: ActionResult | null,
@@ -915,7 +917,7 @@ export async function sendTestEmail(
       recipient: parsed.data.to,
       ok: result.ok,
       skipped: result.skipped ?? null,
-      provider: emailConfig.enabled ? "resend" : "none",
+      provider: emailConfig.provider,
       message: result.message,
     },
   });
@@ -926,8 +928,10 @@ export async function sendTestEmail(
   }
 
   const delivery = emailConfig.enabled
-    ? "Resend accepted the message."
-    : "No RESEND_API_KEY is configured, so the row is journaled as skipped instead of delivered.";
+    ? `${emailConfig.label} accepted the message.`
+    : `No transport is configured${
+        emailConfig.notice ? ` (${emailConfig.notice})` : ""
+      }, so the row is journalled as skipped instead of delivered.`;
 
   return { ok: true, message: `Test message for ${parsed.data.to} — ${result.message} ${delivery}` };
 }

@@ -13,9 +13,11 @@ import { useFormAction } from "@/hooks/use-form-action";
 export function EmailJobControls({
   adminEmail,
   deliveryMode,
+  providerLabel,
 }: {
   adminEmail: string;
-  deliveryMode: "resend" | "outbox";
+  deliveryMode: "live" | "outbox";
+  providerLabel: string;
 }) {
   const run = useFormAction(runReminderJob);
   const test = useFormAction(sendTestEmail);
@@ -75,9 +77,9 @@ export function EmailJobControls({
             />
             <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
               Leave blank to use your own address ({adminEmail}). Delivery mode:{" "}
-              {deliveryMode === "resend"
-                ? "Resend is configured, messages really go out."
-                : "no RESEND_API_KEY — messages are journaled as skipped."}
+              {deliveryMode === "live"
+                ? `${providerLabel} is configured, messages really go out.`
+                : "no mail transport is configured — messages are journaled as skipped."}
             </p>
           </div>
           <Button

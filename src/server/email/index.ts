@@ -1,7 +1,7 @@
 import "server-only";
-import { Resend } from "resend";
 import { emailConfig, env } from "@/lib/env";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { deliver } from "./provider";
 import { renderTemplate, type EmailTemplate } from "./templates";
 
 type LogClient = ReturnType<typeof createAdminClient> | null;
@@ -54,6 +54,11 @@ function providerMessage(error: unknown): string {
   return `the provider refused the message${shaped?.statusCode ? ` (HTTP ${shaped.statusCode})` : ""}`;
 }
 
+/** Written into `email_logs.error` when a row is journalled instead of sent. */
+function offlineReason() {
+  return emailConfig.notice ?? "No mail transport configured (set MAIL_SMTP_* or RESEND_API_KEY).";
+}
+
 export async function sendTemplatedEmail(options: SendOptions): Promise<SendResult> {
   const db = journal();
   const { subject, html } = renderTemplate(options.template, options.values);
@@ -81,7 +86,7 @@ export async function sendTemplatedEmail(options: SendOptions): Promise<SendResu
         body: html,
         dedupe_key: options.dedupeKey ?? `${options.template}:${options.to}:${Date.now()}`,
         status: "queued",
-        provider: emailConfig.apiKey ? "resend" : "console",
+        provider: emailConfig.provider,
         borrow_transaction_id: options.transactionId ?? null,
       })
       .select("id")
@@ -89,31 +94,27 @@ export async function sendTemplatedEmail(options: SendOptions): Promise<SendResu
     logId = created?.id;
   }
 
-  if (!emailConfig.apiKey) {
+  if (!emailConfig.enabled) {
     console.info(`[rcc-libro:email] DEV OUTBOX → ${options.to} · ${subject}`);
     if (logId && db) {
-      await db.from("email_logs").update({ status: "skipped", error: "RESEND_API_KEY not set" }).eq("id", logId);
+      await db
+        .from("email_logs")
+        .update({ status: "skipped", error: offlineReason() })
+        .eq("id", logId);
     }
-    return { ok: true, skipped: "not_configured", message: "No SMTP key configured; recorded in outbox log.", logId };
+    return { ok: true, skipped: "not_configured", message: "No transport configured; recorded in outbox log.", logId };
   }
 
   try {
-    const resend = new Resend(emailConfig.apiKey);
-    const { data, error } = await resend.emails.send({
-      from: `${emailConfig.fromName} <${(emailConfig.fromAddress.match(/<([^>]+)>/) ?? [])[1] ?? emailConfig.fromAddress}>`,
-      to: options.to,
-      subject,
-      html,
-    });
-    if (error) throw error;
+    const receipt = await deliver({ to: options.to, subject, html });
 
     if (logId && db) {
       await db
         .from("email_logs")
-        .update({ status: "sent", sent_at: new Date().toISOString(), provider_id: data?.id ?? null })
+        .update({ status: "sent", sent_at: new Date().toISOString(), provider_id: receipt.id })
         .eq("id", logId);
     }
-    return { ok: true, message: "Sent.", logId };
+    return { ok: true, message: `Sent through ${emailConfig.label}.`, logId };
   } catch (error) {
     const message = providerMessage(error);
     if (logId && db) {
@@ -146,36 +147,34 @@ export async function deliverQueuedEmails(limit = 40) {
   if (error) return { delivered: 0, failed: 0, message: error.message };
   if (!pending?.length) return { delivered: 0, failed: 0, message: "Nothing queued." };
 
-  const resend = emailConfig.apiKey ? new Resend(emailConfig.apiKey) : null;
-  const from = `${emailConfig.fromName} <${
-    (emailConfig.fromAddress.match(/<([^>]+)>/) ?? [])[1] ?? emailConfig.fromAddress
-  }>`;
+  const ready = emailConfig.enabled;
   let delivered = 0;
   let failed = 0;
 
   for (const row of pending as QueuedEmail[]) {
-    if (!resend) {
+    if (!ready) {
       console.info(`[rcc-libro:email] DEV OUTBOX → ${row.recipient} · ${row.subject}`);
       await db.rpc("record_email_result", {
         p_id: row.id,
         p_status: "skipped",
-        p_error: "RESEND_API_KEY not set",
+        p_error: offlineReason(),
       });
       continue;
     }
     try {
-      const { data, error: sendError } = await resend.emails.send({
-        from,
+      const receipt = await deliver({
         to: row.recipient,
         subject: row.subject,
         html: row.body ?? "",
       });
-      if (sendError) throw sendError;
       await db.rpc("record_email_result", {
         p_id: row.id,
         p_status: "sent",
-        p_provider_id: data?.id ?? null,
+        p_provider_id: receipt.id,
       });
+      // `stage_due_reminders()` leaves `provider` at its column default, which
+      // names the transport SQL assumed rather than the one that delivered it.
+      await db.from("email_logs").update({ provider: receipt.provider }).eq("id", row.id);
       delivered += 1;
     } catch (sendError) {
       failed += 1;

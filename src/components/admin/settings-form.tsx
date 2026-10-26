@@ -433,7 +433,8 @@ export function SettingsForm({
             <TextField
               id="senderName"
               label="Notification sender name"
-              hint="Display name shown on every outgoing message."
+              hint="Recorded for the branch record. The display name on outgoing mail is set by the
+                server and is always RCC LIBRO."
               value={draft.senderName}
               maxLength={60}
               disabled={pending}
@@ -443,7 +444,9 @@ export function SettingsForm({
             <TextField
               id="senderEmail"
               label="Notification sender e-mail"
-              hint="Reply-to address. It must be a verified sender in your mail provider."
+              hint="The address borrowers see when they ask who to write back to. The actual sending
+                mailbox comes from MAIL_FROM on the server, which a provider such as Gmail restricts
+                to its own account."
               type="email"
               value={draft.senderEmail}
               maxLength={160}

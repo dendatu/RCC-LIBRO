@@ -113,7 +113,7 @@ export default async function AdminEmailPage({ searchParams }: { searchParams: S
         actions={
           <Badge variant={emailConfig.enabled ? "success" : "warning"} className="gap-1.5">
             <Mail className="size-3.5" />
-            {emailConfig.enabled ? "Resend connected" : "No provider key"}
+            {emailConfig.enabled ? `${emailConfig.label} connected` : "No mail transport"}
           </Badge>
         }
       />
@@ -166,7 +166,8 @@ export default async function AdminEmailPage({ searchParams }: { searchParams: S
         <CardContent>
           <EmailJobControls
             adminEmail={actor.user.email}
-            deliveryMode={emailConfig.enabled ? "resend" : "outbox"}
+            deliveryMode={emailConfig.enabled ? "live" : "outbox"}
+            providerLabel={emailConfig.label}
           />
         </CardContent>
       </Card>

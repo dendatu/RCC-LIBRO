@@ -2,6 +2,7 @@ import { formatPeso } from "@/lib/utils";
 import { APP_NAME, INSTITUTION } from "@/lib/constants";
 
 export type EmailTemplate =
+  | "borrow_confirmed"
   | "due_reminder"
   | "overdue_notice"
   | "reservation_ready"
@@ -44,6 +45,27 @@ export function renderTemplate(template: EmailTemplate, p: Record<string, string
   const num = (key: string) => Number(p[key] ?? 0);
 
   switch (template) {
+    case "borrow_confirmed": {
+      const row = (label: string, value: string) =>
+        `<tr><td style="padding:8px;border:1px solid #E8DFCD;background:#FBF8F2">${label}</td><td style="padding:8px;border:1px solid #E8DFCD">${value}</td></tr>`;
+      return {
+        subject: `Borrowed: ${get("bookTitle")} — due ${get("dueDate")}`,
+        html: SHELL(`
+          <p>Dear <strong>${get("borrowerName")}</strong>,</p>
+          <p>The following title is now checked out to your library account.</p>
+          <table role="presentation" style="width:100%;border-collapse:collapse;margin:16px 0;font-size:13px">
+            ${row("Book title", `<strong>${get("bookTitle")}</strong>`)}
+            ${row("Accession number", get("accessionNumber"))}
+            ${get("barcode") ? row("Barcode", get("barcode")) : ""}
+            ${row("Transaction", get("referenceNo"))}
+            ${row("Date borrowed", get("borrowedDate"))}
+            ${row("Due date", `<strong>${get("dueDate")}</strong>`)}
+            ${row("Return to", get("libraryName") || "the issuing branch")}
+          </table>
+          <p>Renew it at the desk before the due date if you still need it. ${FINE_NOTE}</p>
+          <p style="margin-top:20px">— The RCC LIBRO team</p>`),
+      };
+    }
     case "due_reminder": {
       const days = num("daysRemaining");
       return {
