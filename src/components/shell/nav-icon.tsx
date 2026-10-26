@@ -1,0 +1,67 @@
+"use client";
+
+import {
+  Bell,
+  Boxes,
+  BookMarked,
+  BookOpenCheck,
+  Building2,
+  Calculator,
+  FileSpreadsheet,
+  History,
+  Hourglass,
+  IdCard,
+  LayoutDashboard,
+  LineChart,
+  Library,
+  MailWarning,
+  Plus,
+  QrCode,
+  ScanBarcode,
+  ScrollText,
+  Search,
+  Settings,
+  ShieldCheck,
+  Sparkles,
+  Undo2,
+  UserCog,
+  UserRound,
+  Users,
+  WandSparkles,
+  type LucideIcon,
+} from "lucide-react";
+
+const ICONS: Record<string, LucideIcon> = {
+  Bell,
+  LineChart,
+  Boxes,
+  BookMarked,
+  BookOpenCheck,
+  Building2,
+  Calculator,
+  FileSpreadsheet,
+  History,
+  Hourglass,
+  IdCard,
+  LayoutDashboard,
+  Library,
+  MailWarning,
+  Plus,
+  QrCode,
+  ScanBarcode,
+  ScrollText,
+  Search,
+  Settings,
+  ShieldCheck,
+  Sparkles,
+  Undo2,
+  UserCog,
+  UserRound,
+  Users,
+  WandSparkles,
+};
+
+export function NavIcon({ name, className }: { name: string; className?: string }) {
+  const Icon = ICONS[name] ?? LayoutDashboard;
+  return <Icon className={className ?? "size-4"} aria-hidden />;
+}
