@@ -1,0 +1,54 @@
+# RCC LIBRO — Kong gateway (DB-less declarative config).
+#
+# One published port gives the browser both Supabase surfaces it expects:
+#   /rest/v1/*  → PostgREST   (table reads, inserts, rpc() calls)
+#   /auth/v1/*  → GoTrue      (sign in, sign up, password reset, admin users)
+#
+# Neither upstream is prefix-aware, so `strip_path` removes the matched path and
+# the request arrives as `/books` or `/token`. No key-auth plugin: this gateway
+# is meant to stay on loopback, and the JWT in every `apikey` header already
+# picks the Postgres role.
+
+_format_version: "3.0"
+
+plugins:
+  - name: cors
+    config:
+      # supabase-js always sends apikey + Authorization, so the preflight has
+      # to answer those headers; no cookies are involved (credentials stay off).
+      origins: ["*"]
+      methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD]
+      headers: [Accept, Accept-Language, Authorization, Content-Type, DNT, Range, X-Client-Info, apikey, x-supabase-api-version, x-supabase-key, x-supabase-schema, prefer]
+      max_age: 86400
+      credentials: false
+
+services:
+  - name: rest
+    host: postgrest
+    port: 3000
+    protocol: http
+    retries: 0
+    connect_timeout: 60000
+    write_timeout: 60000
+    read_timeout: 60000
+    routes:
+      - name: rest-root
+        paths: ["/rest/v1"]
+        protocols: [http, https]
+        strip_path: true
+        preserve_host: false
+
+  - name: auth
+    host: gotrue
+    port: 9999
+    protocol: http
+    retries: 0
+    connect_timeout: 60000
+    write_timeout: 60000
+    read_timeout: 60000
+    routes:
+      - name: auth-root
+        paths: ["/auth/v1"]
+        protocols: [http, https]
+        strip_path: true
+        preserve_host: false

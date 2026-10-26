@@ -91,14 +91,20 @@
   }
 }
 
-@layer utilities {
+/* A surface recipe, not a utility: it must stay overridable by the `bg-*`
+   colour utilities on the same element. Tailwind sorts `components` below
+   `utilities`, so keeping `.surface-card` in the utilities layer made its
+   `background` shorthand clobber `bg-brand-800` and paint cream text on white. */
+@layer components {
   .surface-card {
     background: var(--color-card);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-card);
   }
+}
 
+@layer utilities {
   .hover-lift {
     transition: transform 200ms ease, box-shadow 200ms ease, border-color 200ms ease;
   }

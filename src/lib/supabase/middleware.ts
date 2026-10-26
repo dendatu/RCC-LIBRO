@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { supabaseEnv } from "@/lib/env";
 
 /**
  * Refreshes the Supabase session cookie on every dynamic request and gates the
@@ -8,12 +9,14 @@ import { NextResponse, type NextRequest } from "next/server";
  */
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const config = supabaseEnv();
 
-  if (!url || !anonKey) return response;
+  if (!config) return response;
 
-  const supabase = createServerClient(url, anonKey, {
+  const supabase = createServerClient(config.url, config.anonKey, {
+    // Middleware runs server-side too, so it dials the same address as the
+    // server clients while reading the cookie the browser wrote.
+    cookieOptions: { name: config.storageKey },
     cookies: {
       getAll() {
         return request.cookies.getAll();

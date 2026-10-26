@@ -352,7 +352,7 @@ request to `/api/cron/reminders`.
 
 ```
 supabase/
-  migrations/        00001-00011, applied in order
+  migrations/        00001-00012, applied in order
   schema.sql         structure only, one paste for the SQL editor
   seed-demo.sql      demo roles + catalogue, optional and re-runnable (needs the
                      logins to exist first: npm run demo:accounts)
@@ -384,6 +384,8 @@ src/
     qr.ts pdf.ts csv.ts nav.ts env.ts
 docs/ARCHITECTURE.md how the layers fit together
 scripts/             image placeholders, schema concat, SQL validation, demo logins
+Dockerfile           multi-stage production image (output: "standalone")
+docker/              self-hosted stack: compose, Kong routes, initdb helpers
 ```
 
 The route map, labels and role visibility for every page live in
@@ -444,3 +446,100 @@ Drop your own photographs into `public/images/library/` using the same file name
 `og-cover.svg`) — the UI references that folder throughout, so real photos become
 live without code changes once they are added (upload `.jpg`/`.png` versions and
 update the corresponding reference if you replace the format).
+
+---
+
+## 13. Running the whole system on another machine (Docker)
+
+Sections 2-5 put Postgres and Auth in Supabase's cloud, so that installation
+needs an internet connection. `docker/` ships the same stack on one machine
+instead: Postgres with Supabase's managed roles and `auth` schema, GoTrue for
+logins, PostgREST for the data API, Kong as the single origin they are published
+from, and the built Next.js app. After the images are downloaded once, the
+library runs with the network cable unplugged.
+
+Realtime, Storage and Studio from the official Supabase bundle are left out —
+this project opens no realtime channel and stores no uploaded files.
+
+**Prerequisites:** Docker Desktop (WSL2 backend on Windows) or any Docker with
+Compose v2. That is all — Node lives inside the image. Plan on one connected run:
+roughly 2 GB of base images, then `npm ci` and the Google font files.
+
+```bash
+cd "RCC LIBRO/docker"
+cp env.example .env            # local credentials, safe to leave as-is
+docker compose up -d --build   # or `npm run docker:up` from the project root
+```
+
+`up -d --build` gives an empty library: sign up from `/register` and promote the
+first account with `supabase/promote-to-admin.sql`. For the demo data — the
+catalogue, the sample loans and the seven logins — run the `demo` profile next:
+
+```bash
+npm run docker:demo            # = demo-accounts, then seed, in that order
+```
+
+The order matters and the compose file enforces it: `00009` can only classify
+accounts GoTrue already owns, so the logins are created through the admin API
+before `seed-demo.sql` runs. Re-running either is harmless — existing accounts
+keep their own passwords and the seed is written to be idempotent.
+
+Then open **http://localhost:3000** and sign in with any account from
+[`supabase/seed-demo.sql`](file:///C:/Users/user/Documents/RCC%20LIBRO/supabase/seed-demo.sql)
+using `DEMO_PASSWORD` from `docker/.env` (`RccLibrary#2026` by default).
+
+| Command | What it does |
+| ------- | ------------ |
+| `npm run docker:up` | build and start everything (restarts the app after a code change) |
+| `npm run docker:demo` | create the demo logins, then the demo catalogue and loans |
+| `npm run docker:logs` | tail the last lines of every container |
+| `npm run docker:down` | stop, keeping the database volume |
+| `npm run docker:reset` | stop **and delete the database**, so initdb re-applies `schema.sql` |
+
+`docker compose down -v` is the only way to re-run the schema: `supabase/schema.sql`
+is applied by Postgres' first-boot `initdb`, exactly like the hosted project's
+migration history, and never re-applied on an existing volume. Later migrations
+belong in that file — run `npm run schema:sql` first, then `docker:reset`.
+
+No Postgres port is published; reach the database through the container when you
+want to inspect it, the same way the SQL editor would be used:
+
+```bash
+docker compose -f docker/docker-compose.yml --env-file docker/.env \
+  exec db psql -U supabase_admin -d postgres
+```
+
+**Ports.** Kong publishes `8000` and the app `3000`, both on `127.0.0.1` only.
+The gateway serves `/rest/v1/*` (PostgREST) and `/auth/v1/*` (GoTrue), which is
+why the app's `NEXT_PUBLIC_SUPABASE_URL` is `http://localhost:8000`. Those
+`NEXT_PUBLIC_*` values are inlined while the image builds, so changing a port
+means rebuilding: edit `KONG_HTTP_PORT` in `docker/.env` and re-run `docker:up`
+with `--build`. The server side does not need a rebuild — it reads
+`SUPABASE_INTERNAL_URL=http://kong:8000`, the in-network address, while the
+browser keeps the loopback one.
+
+**What stays offline.** Everything except these four, each off by default:
+
+- *Google SSO* — set `GOOGLE_ENABLED=true`, `GOOGLE_CLIENT_ID` and
+  `GOOGLE_CLIENT_SECRET` in `docker/.env`, restart `gotrue`, and allow
+  `http://localhost:8000/auth/v1/callback` as the client's redirect URI.
+  E-mail/password sign-in and registration always work.
+- *Password reset* — GoTrue sends that one mail over SMTP. Point `SMTP_HOST` /
+  `SMTP_PORT` at anything listening locally (Mailpit on `1025`) or leave the
+  recovery flow unused.
+- *Reminder e-mails* — with `RESEND_API_KEY` empty, notices are journalled to
+  `email_logs` and printed to the app container's log instead of being sent;
+  Resend itself requires internet. Trigger a run with
+  `curl -X POST http://localhost:3000/api/cron/reminders -H "Authorization: Bearer $CRON_SECRET"`.
+- *QR codes* — they encode `NEXT_PUBLIC_SITE_URL`, so a printed card only scans
+  on the machine that served it. For a phone on the same Wi-Fi, bind the ports
+  without the `127.0.0.1:` prefix and set `SITE_URL` to this machine's LAN
+  address, then rebuild.
+
+**Treating it as production.** `docker/env.example` deliberately ships a JWT
+secret and the two API keys signed by it, because the stack binds to loopback
+and the alternative is a broken first run. Before any of this leaves the laptop,
+replace `SUPABASE_JWT_SECRET` and both keys, set `POSTGRES_PASSWORD`,
+rotate `DEMO_PASSWORD`, drop the demo profile, and delete
+`supabase/seed-demo.sql` from the install.
+

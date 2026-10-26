@@ -10,7 +10,12 @@
     "seed:images": "node scripts/generate-library-placeholders.mjs",
     "schema:sql": "node scripts/build-schema-sql.mjs",
     "demo:accounts": "node scripts/create-demo-accounts.mjs",
-    "validate:sql": "bash scripts/validate-sql.sh"
+    "validate:sql": "bash scripts/validate-sql.sh",
+    "docker:up": "docker compose -f docker/docker-compose.yml --env-file docker/.env up -d --build",
+    "docker:demo": "docker compose -f docker/docker-compose.yml --env-file docker/.env --profile demo run --rm demo-accounts && docker compose -f docker/docker-compose.yml --env-file docker/.env --profile demo run --rm seed",
+    "docker:logs": "docker compose -f docker/docker-compose.yml --env-file docker/.env logs --tail 80",
+    "docker:down": "docker compose -f docker/docker-compose.yml --env-file docker/.env down",
+    "docker:reset": "docker compose -f docker/docker-compose.yml --env-file docker/.env down -v"
   },
   "dependencies": {
     "@hookform/resolvers": "^6.0.0",

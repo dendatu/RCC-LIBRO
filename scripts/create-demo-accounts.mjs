@@ -7,7 +7,9 @@
 // it fails, which is why 00009 refuses to create credentials itself. This script
 // is the supported way to get them for a local or demo project.
 //
-// Reads NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY from .env.local.
+// Reads NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY from the
+// environment first, then .env.local — so `docker compose run demo-accounts`
+// can point it at the local gateway without any file in the image.
 // Accounts that already exist are left untouched, password included — roles,
 // SBTR numbers and the sample catalogue come from supabase/seed-demo.sql.
 
@@ -50,7 +52,7 @@ if (!url || !key) {
   console.error("NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required (.env.local).");
   process.exit(1);
 }
-if (!/^https:\/\//.test(url)) {
+if (!/^https?:\/\//.test(url)) {
   console.error(`NEXT_PUBLIC_SUPABASE_URL does not look like a project URL: ${url}`);
   process.exit(1);
 }

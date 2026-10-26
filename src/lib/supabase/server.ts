@@ -7,10 +7,13 @@ import { requireSupabaseEnv } from "@/lib/env";
  * and staff writes — Postgres enforces Row Level Security against this token.
  */
 export async function createClient() {
-  const { url, anonKey } = requireSupabaseEnv();
+  const { url, anonKey, storageKey } = requireSupabaseEnv();
   const cookieStore = await cookies();
 
   return createServerClient(url, anonKey, {
+    // Set explicitly because `url` may be the in-network address of a local
+    // stack, whose host would otherwise invent a second session cookie.
+    cookieOptions: { name: storageKey },
     cookies: {
       getAll() {
         return cookieStore.getAll();
