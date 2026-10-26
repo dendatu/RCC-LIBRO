@@ -12,7 +12,8 @@ policy, watch analytics and read the audit trail.
   components, Framer Motion, Recharts, React Hook Form + Zod
 - Backend: **Supabase** (Postgres, Auth with Google SSO, Row Level Security),
   business rules implemented as Postgres functions
-- E-mail: **Resend**, journaled in `email_logs` with idempotent deduplication
+- E-mail: SMTP (Gmail app password) or Resend, journaled in `email_logs` with
+  idempotent deduplication
 - Brand: brown `#6F4E37`, cream `#F5F0E6`, gold `#D4A373`
 
 ---
@@ -240,10 +241,13 @@ numbered migrations — the same path a human follows in the Supabase dashboard.
 
 ## 7. E-mail reminders and the delivery job
 
-Every notice leaves with the display name **RCC LIBRO**. Four things are sent:
-the borrow confirmation (issued straight from the desk action, so the borrower
-has the due date in writing before they walk away), the due-date reminders
-(7, 3 and 1 days before), the overdue notice, and the welcome message.
+Every notice leaves with the display name **RCC LIBRO**. Five things are sent:
+the borrow confirmation and the return confirmation (both issued straight from
+the desk action, so the borrower has the loan opened and closed in writing), the
+due-date reminders (7, 3 and 1 days before), the overdue notice, and the welcome
+message. The return notice names the condition the copy came back in and quotes
+the overdue fine; a lost or damaged penalty is posted as a separate `fines` row,
+so the message points at the borrower's Penalties page instead of an amount.
 
 Due-date reminders and overdue notices are produced by a Postgres function, not
 by the UI, so they cannot be skipped or double-sent:
@@ -257,14 +261,20 @@ by the UI, so they cannot be skipped or double-sent:
   reminder in `/dashboard/notifications` even when SMTP is not configured.
 - Delivery is tracked in `public.email_logs`: `queued → sending →`
   `sent | bounced | failed | skipped`, with `provider_id`, `error`, `attempts`,
-  `queued_at` and `sent_at`. The admin console reads this table as the outbox.
+  `claimed_at`, `queued_at` and `sent_at`. The admin console reads this table as
+  the outbox.
 - `claim_email_queue()` leases rows with `FOR UPDATE SKIP LOCKED`, so a
   scheduled run and a manual run can never mail the same notice twice, and
-  `release_stale_email_claims()` returns leases from a runner that died.
+  `release_stale_email_claims()` returns leases from a runner that died. The
+  lease is measured on `claimed_at` — the moment the row was handed over — not
+  on `queued_at`, so a message that waited in the queue for hours is not
+  declared stale while its runner is still working on it.
 - Those three plus `stage_due_reminders()` are service-role only: revoked by
   name from `public, anon, authenticated` (Supabase grants every new function to
   both API roles otherwise) and guarded by `assert_service_runner()`, which
-  refuses any caller carrying a JWT subject.
+  refuses any caller carrying a JWT subject. That helper comes from `00005`, so
+  a project whose `00005` predates it must re-paste the helper before `00010`
+  will run.
 
 ### Transports
 
@@ -438,7 +448,7 @@ src/
     marketing/ auth/ catalog/ circulation/ reservations/ analytics/ admin/
   server/
     actions/         Server Actions: auth, catalog, circulation, reservations, admin
-    email/           Resend client + HTML templates
+    email/           SMTP/Resend transport + HTML templates
   lib/
     supabase/        browser / session / service-role clients + middleware
     rbac.ts          session resolution and role guards

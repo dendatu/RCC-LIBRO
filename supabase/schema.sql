@@ -2391,9 +2391,20 @@ alter type public.email_status add value if not exists 'sending';
 alter table public.email_logs
   add column if not exists attempts smallint not null default 0;
 
+-- When the *current* lease was taken. `queued_at` cannot answer that: a backlog
+-- row claimed hours after it was staged would look instantly stale to
+-- release_stale_email_claims() and be handed to a second runner mid-send.
+alter table public.email_logs
+  add column if not exists claimed_at timestamptz;
+
 comment on column public.email_logs.attempts is
   'Incremented when a runner claims the row. Capped by claim_email_queue so a '
   'permanently rejected recipient cannot be retried on every cron tick.';
+
+comment on column public.email_logs.claimed_at is
+  'Stamped by claim_email_queue() and the clock release_stale_email_claims() '
+  'measures the lease against. Rows claimed before this column existed fall back '
+  'to queued_at.';
 
 comment on column public.email_logs.status is
   'queued → sending (leased by one runner) → sent | bounced | failed | skipped.';
@@ -2435,8 +2446,9 @@ begin
      for update of e skip locked
   )
   update public.email_logs as e
-     set status   = 'sending',
-         attempts = picked.attempts + 1
+     set status     = 'sending',
+         attempts   = picked.attempts + 1,
+         claimed_at = now()
     from picked
    where e.id = picked.id
   returning e.*;
@@ -2470,7 +2482,7 @@ begin
   with stale as (
     select id, attempts from public.email_logs
      where status = 'sending'
-       and queued_at < now() - p_lease
+       and coalesce(claimed_at, queued_at) < now() - p_lease
   )
   update public.email_logs e
      set status = 'queued'
@@ -2484,7 +2496,7 @@ begin
          error  = coalesce(error, 'lease expired after ' || attempts || ' attempt(s)')
    where status = 'sending'
      and attempts >= p_max_attempts
-     and queued_at < now() - p_lease;
+     and coalesce(claimed_at, queued_at) < now() - p_lease;
 
   get diagnostics v_expired = row_count;
 

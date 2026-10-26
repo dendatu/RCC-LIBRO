@@ -38,7 +38,7 @@ default privileges.
 | `00007_analytics_rpc.sql` | `dashboard_stats()`, `borrowing_trends()`, `popular_books()`, `popular_categories()`, `branch_usage()`, `most_active_borrowers()`, `borrower_summary()`, `recently_added()`, `recommended_books()`, `search_books()` |
 | `00008_row_level_security.sql` | 46 policies, function grants, `anon` revoked from the journals |
 | `00009_seed_demo.sql` | preflight, then seven demo logins enriched with roles/SBTR, 20 titles, 46 copies, 30 loans, a fine, a reservation, notifications, audit row — bundled as `seed-demo.sql` |
-| `00010_email_queue_claims.sql` | the `sending` lease state, `attempts`, `claim_email_queue()` (`FOR UPDATE SKIP LOCKED`), `release_stale_email_claims()`, `record_email_result()`, service-role-only grants, the claim index |
+| `00010_email_queue_claims.sql` | the `sending` lease state, `attempts`, `claimed_at`, `claim_email_queue()` (`FOR UPDATE SKIP LOCKED`), `release_stale_email_claims()`, `record_email_result()`, service-role-only grants, the claim index |
 | `00011_rpc_caller_scoping.sql` | `borrower_summary()` answers a member with their own counts; `most_active_borrowers()` returns nothing to non-staff |
 
 ## Sample data

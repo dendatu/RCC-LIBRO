@@ -434,6 +434,9 @@ begin
     raise exception 'claimed row should be leased: got status=% attempts=%',
       v_row.status, v_row.attempts;
   end if;
+  if v_row.claimed_at is null then
+    raise exception 'a leased row must carry claimed_at, the clock the lease is measured on';
+  end if;
 
   -- A leased row must never be handed to a second runner.
   select count(*) into v_claimed from public.claim_email_queue(100) c where c.id = v_row.id;
@@ -453,9 +456,23 @@ begin
     raise exception 'record_email_result dropped the provider id';
   end if;
 
+  -- A live lease is never reclaimed, even on a row that sat queued for an hour:
+  -- the clock is claimed_at, not queued_at.
+  update public.email_logs
+     set status = 'sending', attempts = 1,
+         queued_at = now() - interval '1 hour', claimed_at = now()
+   where id = v_row.id;
+  if public.release_stale_email_claims(interval '15 minutes') <> 0 then
+    raise exception 'release_stale_email_claims stole a lease that had just been taken';
+  end if;
+  if (select status from public.email_logs where id = v_row.id) <> 'sending' then
+    raise exception 'a fresh lease must stay with its runner';
+  end if;
+
   -- A runner that died mid-flight must have its lease returned.
   update public.email_logs
-     set status = 'sending', attempts = 1, queued_at = now() - interval '1 hour'
+     set status = 'sending', attempts = 1,
+         queued_at = now() - interval '1 hour', claimed_at = now() - interval '1 hour'
    where id = v_row.id;
   if public.release_stale_email_claims(interval '15 minutes') < 1 then
     raise exception 'release_stale_email_claims ignored an expired lease';
@@ -466,7 +483,8 @@ begin
 
   -- Past the attempt cap the same row fails permanently instead of looping.
   update public.email_logs
-     set status = 'sending', attempts = 5, queued_at = now() - interval '1 hour'
+     set status = 'sending', attempts = 5,
+         queued_at = now() - interval '1 hour', claimed_at = now() - interval '1 hour'
    where id = v_row.id;
   perform public.release_stale_email_claims(interval '15 minutes');
   if (select status from public.email_logs where id = v_row.id) <> 'failed' then

@@ -3,6 +3,7 @@ import { APP_NAME, INSTITUTION } from "@/lib/constants";
 
 export type EmailTemplate =
   | "borrow_confirmed"
+  | "return_confirmed"
   | "due_reminder"
   | "overdue_notice"
   | "reservation_ready"
@@ -63,6 +64,61 @@ export function renderTemplate(template: EmailTemplate, p: Record<string, string
             ${row("Return to", get("libraryName") || "the issuing branch")}
           </table>
           <p>Renew it at the desk before the due date if you still need it. ${FINE_NOTE}</p>
+          <p style="margin-top:20px">— The RCC LIBRO team</p>`),
+      };
+    }
+    case "return_confirmed": {
+      const row = (label: string, value: string) =>
+        `<tr><td style="padding:8px;border:1px solid #E8DFCD;background:#FBF8F2">${label}</td><td style="padding:8px;border:1px solid #E8DFCD">${value}</td></tr>`;
+      const condition = get("condition") || "good";
+      const conditionLabel =
+        condition === "lost" ? "Lost" : condition === "damaged" ? "Damaged" : "Good condition";
+      const fine = num("fine");
+      const late = num("overdueDays");
+      // `return_book()` only reports the overdue fine in its payload — the lost or
+      // damaged penalty is posted as a separate `fines` row, so quote no amount for it.
+      const penalty =
+        condition === "lost"
+          ? `<p style="color:#A83A34"><strong>The copy was recorded as lost.</strong> A replacement
+             penalty was raised against your account; you can see the amount under
+             <strong>Penalties</strong> on your dashboard and settle it in cash at any branch desk.</p>`
+          : condition === "damaged"
+            ? `<p style="color:#A83A34"><strong>The copy was recorded as damaged.</strong> A repair
+               penalty was raised against your account; the amount is listed under
+               <strong>Penalties</strong> on your dashboard.</p>`
+            : "";
+      const overdue =
+        fine > 0
+          ? `<p style="color:#A83A34"><strong>Overdue fine: ${formatPeso(fine)}</strong> —
+             ${late} day${late === 1 ? "" : "s"} past the due date. Borrowing stays paused until the
+             balance on your account is settled at the desk.</p>`
+          : "";
+      const clean =
+        fine === 0 && condition === "good"
+          ? `<p>The copy came back on time and no fine was incurred. Your borrowing privileges are
+             fully open again.</p>`
+          : "";
+      return {
+        subject:
+          condition !== "good"
+            ? `Returned: ${get("bookTitle")} — recorded ${condition}`
+            : fine > 0
+              ? `Returned: ${get("bookTitle")} — ${formatPeso(fine)} to settle`
+              : `Returned: ${get("bookTitle")} — all settled`,
+        html: SHELL(`
+          <p>Dear <strong>${get("borrowerName")}</strong>,</p>
+          <p>The circulation desk has checked this title back in and closed the loan.</p>
+          <table role="presentation" style="width:100%;border-collapse:collapse;margin:16px 0;font-size:13px">
+            ${row("Book title", `<strong>${get("bookTitle")}</strong>`)}
+            ${row("Accession number", get("accessionNumber"))}
+            ${row("Transaction", get("referenceNo"))}
+            ${row("Date borrowed", get("borrowedDate"))}
+            ${row("Due date", get("dueDate"))}
+            ${row("Date returned", `<strong>${get("returnedDate")}</strong>`)}
+            ${row("Condition on return", conditionLabel)}
+            ${row("Checked in at", get("libraryName") || "the branch library")}
+          </table>
+          ${penalty}${overdue}${clean}
           <p style="margin-top:20px">— The RCC LIBRO team</p>`),
       };
     }

@@ -302,6 +302,38 @@ async function notifyBorrower(loan: DeskLoan | null, receipt: BorrowReceipt) {
   }
 }
 
+/** Same contract as `notifyBorrower()`: the closed loan is never undone by a failing mailer. */
+async function notifyReturner(
+  loan: DeskLoan | null,
+  outcome: { referenceNo: string; title: string; condition: ReturnCondition; fine: number; overdueDays: number },
+) {
+  if (!loan?.borrower_email) return;
+  try {
+    await sendTemplatedEmail({
+      to: loan.borrower_email,
+      userId: loan.borrower_id,
+      template: "return_confirmed",
+      dedupeKey: `return:${loan.id}`,
+      transactionId: loan.id,
+      values: {
+        borrowerName: loan.borrower_name,
+        bookTitle: outcome.title || loan.book_title,
+        accessionNumber: loan.accession_number,
+        referenceNo: outcome.referenceNo || loan.reference_no,
+        borrowedDate: formatDate(loan.date_borrowed),
+        dueDate: formatDate(loan.due_date),
+        returnedDate: formatDate(new Date().toISOString()),
+        condition: outcome.condition,
+        fine: outcome.fine,
+        overdueDays: outcome.overdueDays,
+        libraryName: loan.library_name,
+      },
+    });
+  } catch (error) {
+    console.error("[rcc-libro:email] the return notice could not be sent", error);
+  }
+}
+
 export async function checkInBook(
   _prev: ActionResult<unknown> | null,
   form: FormData,
@@ -338,6 +370,18 @@ export async function checkInBook(
 
     const fine = Number(payload.fine ?? 0);
     const overdueDays = Number(payload.overdue_days ?? 0);
+    const outcome: ReturnOutcome = {
+      transactionId,
+      referenceNo: loan?.reference_no ?? "",
+      title: loan?.book_title ?? "",
+      borrowerName: loan?.borrower_name ?? "",
+      condition,
+      fine,
+      overdueDays,
+      overdueHours: Number(payload.overdue_hours ?? 0),
+      copyStatus: String(payload.copy_status ?? "available"),
+    };
+    await notifyReturner(loan, outcome);
     return {
       ok: true,
       message:
@@ -348,17 +392,7 @@ export async function checkInBook(
             : condition === "damaged"
               ? "Recorded as damaged. The repair penalty was raised against the borrower."
               : "Returned on time — no fine.",
-      data: {
-        transactionId,
-        referenceNo: loan?.reference_no ?? "",
-        title: loan?.book_title ?? "",
-        borrowerName: loan?.borrower_name ?? "",
-        condition,
-        fine,
-        overdueDays,
-        overdueHours: Number(payload.overdue_hours ?? 0),
-        copyStatus: String(payload.copy_status ?? "available"),
-      },
+      data: outcome,
     };
   });
 }
